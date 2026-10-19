@@ -78,16 +78,16 @@ firstpage-lab analyze samples/synthetic.pdf --backend jev --allow-external-text 
 
 `jev-1.13-free` is free while available; OpenCode refuses free models on networks it flags as abusive (VPN/datacenter IPs). The paid `jev-1.13` requires workspace credit.
 
-### OpenRouter-hosted Jev Router
+### OpenRouter-hosted Jev 1.14
 
-The `openrouter` backend sends the same redacted page text through OpenRouter's Chat Completions API and parses strict-JSON per-page probabilities, using the `typesafe/jev-router` model by default:
+The `openrouter` backend sends the same redacted System One payload through OpenRouter's alpha decisions endpoint (`typesafe/jev-1.14` by default, the real Jev decisions model — not the `jev-router` chat proxy that forwards to other LLMs):
 
 ~~~sh
 export OPENROUTER_API_KEY='sk-or-v1-...'
 firstpage-lab analyze samples/synthetic.pdf --backend openrouter --allow-external-text --sample-count 20 --out outputs/openrouter-demo
 ~~~
 
-Set `OPENROUTER_MODEL` to another OpenRouter model ID to compare models. Router pricing is dynamic per request; replies are uncalibrated pseudo-labels, never ground truth.
+`OPENROUTER_MODEL` pins another TypeSafe decisions model such as `typesafe/jev-1.13`; `OPENROUTER_ENDPOINT` overrides the endpoint. Replies are uncalibrated pseudo-labels, never ground truth.
 
 **Never submit real eMPF, bank or other confidential customer PDF text without explicit security and contractual approval.** The simple demonstration redaction is best-effort only, not reliable DLP. Keys, real PDFs and results must remain outside GitHub.
 

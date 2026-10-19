@@ -44,7 +44,7 @@ def analyze(args):
                                 model=os.getenv("JEV_MODEL", "jev-1.13.0"),
                                 allow_external_text=args.allow_external_text) if args.backend == "jev" else
                   OpenRouterClassifier(key=os.getenv("OPENROUTER_API_KEY"),
-                                       model=os.getenv("OPENROUTER_MODEL", "typesafe/jev-router"),
+                                       model=os.getenv("OPENROUTER_MODEL", "typesafe/jev-1.14"),
                                        allow_external_text=args.allow_external_text))
     probabilities = classifier.classify(sample)
     candidates = mine(sample, probabilities)
@@ -53,7 +53,7 @@ def analyze(args):
     origin = {"mock": "MOCK_HEURISTIC", "jev": "JEV_API", "openrouter": "OPENROUTER_API"}[args.backend]
     model = {"mock": "MOCK_ONLY",
              "jev": os.getenv("JEV_MODEL", "jev-1.13.0"),
-             "openrouter": os.getenv("OPENROUTER_MODEL", "typesafe/jev-router")}[args.backend]
+             "openrouter": os.getenv("OPENROUTER_MODEL", "typesafe/jev-1.14")}[args.backend]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     _write_csv(out / "sample_decisions.csv", ["SourcePage", "FirstPageProbability", "Origin"],

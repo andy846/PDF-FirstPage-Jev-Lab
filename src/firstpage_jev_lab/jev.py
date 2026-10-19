@@ -16,12 +16,20 @@ OPENCODE_ENDPOINT = "https://opencode.ai/inference/systemone/v1/systemone"
 DEFAULT_MODEL = "jev-1.13.0"
 # Cloudflare fronts the OpenCode gateway and bans the default Python-urllib signature (error 1010).
 USER_AGENT = "pdf-firstpage-jev-lab/0.2.0 (+https://github.com/andy846/PDF-FirstPage-Jev-Lab)"
+TASK_INSTRUCTIONS = ("Classify FIRST versus CONTINUATION pages in a multi-letter text PDF. "
+                     "A first page begins a new independent letter; repeated headers can occur on continuation pages.")
 PAGE_COUNTER = re.compile(r"\b(?:page\s*)?1\s*(?:of|/)\s*\d{1,4}\b", re.I)
 
 
 def resolve_api_key() -> str | None:
     """Official TypeSafe key, or an OpenCode Console service key for the same model."""
     return os.getenv("TYPESAFE_API_KEY") or os.getenv("OPENCODE_API_KEY")
+
+
+def page_question(number: int) -> dict:
+    """System One noul question asking whether a source page starts a new mailpiece."""
+    return {"type": "noul",
+            "instructions": f"Is PDF source page {number} the FIRST page of a distinct new mailpiece, not a continuation page?"}
 
 
 def redact(text: str) -> str:
@@ -76,12 +84,9 @@ class JevClassifier:
             batch = pages[start:start+batch_size]
             payload = {
                 "model": self.model,
-                "state": {"task": "Classify FIRST versus CONTINUATION pages in a multi-letter text PDF. "
-                                  "A first page begins a new independent letter; repeated headers can occur on continuation pages.",
+                "state": {"task": TASK_INSTRUCTIONS,
                           "pages": [{"page": p.number, "text": redact(p.text)[:chars_per_page]} for p in batch]},
-                "questions": {f"page_{p.number}": {"type": "noul",
-                    "instructions": f"Is PDF source page {p.number} the FIRST page of a distinct new mailpiece, not a continuation page?"}
-                              for p in batch},
+                "questions": {f"page_{p.number}": page_question(p.number) for p in batch},
             }
             data = self.transport(payload)
             answers = data.get("answers") if isinstance(data, dict) else None

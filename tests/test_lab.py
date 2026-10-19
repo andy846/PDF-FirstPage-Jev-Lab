@@ -9,7 +9,7 @@ from firstpage_jev_lab.demo import make_demo
 from firstpage_jev_lab.pdftext import extract_pages, select_sample
 from firstpage_jev_lab.jev import (JevClassifier, MockClassifier, OFFICIAL_ENDPOINT,
                                    OPENCODE_ENDPOINT, USER_AGENT, redact, _parse_answer)
-from firstpage_jev_lab.openrouter import OpenRouterClassifier, parse_pages
+from firstpage_jev_lab.openrouter import OpenRouterClassifier
 from firstpage_jev_lab.rules import Rule, evaluate, make_index, matches, mine
 from firstpage_jev_lab.cli import main
 
@@ -144,15 +144,16 @@ def test_openrouter_classifier_offline_contract(fixture, monkeypatch):
     requests = []
     def fake_api(payload):
         requests.append(payload)
-        return {"choices": [{"message": {"content": '{"pages": {"1": 0.9, "2": 0.05, "3": 0.05}}'}}]}
+        return {"answers": {k: {"type": "noul", "noul": .91 if int(k[5:]) == 1 else .06}
+                            for k in payload["questions"]}}
     client = OpenRouterClassifier(key="fake-key", allow_external_text=True, transport=fake_api)
     answer = client.classify(pages[:3], batch_size=2)
-    assert answer == {1: .9, 2: .05, 3: .05}
+    assert answer == {1: .91, 2: .06, 3: .06}
     assert len(requests) == 2
-    assert requests[0]["model"] == "typesafe/jev-router"
-    assert requests[0]["temperature"] == 0
-    assert requests[0]["messages"][0]["role"] == "system"
-    assert requests[0]["messages"][1]["content"].startswith("Page 1: ")
+    assert requests[0]["model"] == "typesafe/jev-1.14"
+    assert requests[0]["questions"]["page_1"]["type"] == "noul"
+    assert requests[0]["state"]["pages"][0]["page"] == 1
+    assert client.endpoint.endswith("/api/alpha/decisions")
 
 
 def test_openrouter_requires_permission_and_key(monkeypatch):
@@ -163,12 +164,16 @@ def test_openrouter_requires_permission_and_key(monkeypatch):
         OpenRouterClassifier(key="", allow_external_text=True)
 
 
-def test_openrouter_malformed_reply_rejected():
-    for content in [None, "", "no json here", "{}", '{"pages": {}}', '{"pages": []}',
-                    '{"pages": {"1": 1.5}}', '{"pages": {"x": 0.5}}', '{"pages": {"1": "high"}}']:
-        with pytest.raises(ValueError):
-            parse_pages(content)
-    assert parse_pages('```json\n{"pages": {"4": 0.75}}\n```') == {4: 0.75}
+def test_openrouter_missing_answers_rejected(fixture):
+    _, _, pages = fixture
+    client = OpenRouterClassifier(key="fake-key", allow_external_text=True,
+                                  transport=lambda payload: {"answers": None})
+    with pytest.raises(ValueError, match="answers"):
+        client.classify(pages[:2], batch_size=2)
+    client = OpenRouterClassifier(key="fake-key", allow_external_text=True,
+                                  transport=lambda payload: {"answers": {"page_7": {"type": "noul", "noul": .5}}})
+    with pytest.raises(ValueError, match="page 1"):
+        client.classify(pages[:2], batch_size=2)
 
 
 def test_malformed_jev_output_rejected():

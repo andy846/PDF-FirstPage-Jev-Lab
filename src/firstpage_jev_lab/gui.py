@@ -250,7 +250,7 @@ class MainWindow(QMainWindow):
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Mock • Fully offline", "mock")
         self.backend_combo.addItem("Jev • TypeSafe external API", "jev")
-        self.backend_combo.addItem("OpenRouter • Jev Router external API", "openrouter")
+        self.backend_combo.addItem("OpenRouter • Jev 1.14 external API", "openrouter")
         self.backend_combo.currentIndexChanged.connect(self._update_backend)
         ai_col.addWidget(self.backend_combo)
         self.api_status = _small_label("", muted=True)

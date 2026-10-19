@@ -50,7 +50,7 @@ firstpage-lab-gui
 
 Alternatively set `OPENCODE_API_KEY` (OpenCode Console service key) with `JEV_ENDPOINT=https://opencode.ai/inference/systemone/v1/systemone` and `JEV_MODEL=jev-1.13-free` to run the same Jev 1.13 through OpenCode.
 
-The **OpenRouter • Jev Router external API** backend uses `OPENROUTER_API_KEY` (and optional `OPENROUTER_MODEL`, default `typesafe/jev-router`) with the same consent flow.
+The **OpenRouter • Jev 1.14 external API** backend uses `OPENROUTER_API_KEY` (and optional `OPENROUTER_MODEL`, default `typesafe/jev-1.14`) with the same consent flow.
 
 Then choose **Jev / TypeSafe external API**. The GUI requires:
 
