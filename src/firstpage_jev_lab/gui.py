@@ -457,7 +457,7 @@ class MainWindow(QMainWindow):
             if confirmation != QMessageBox.StandardButton.Yes:
                 return
         self._invalidate()
-        self._worker = AnalysisWorker(request, self)
+        self._worker = AnalysisWorker(request)  # not a child of the QWidget
         self._worker.stage.connect(self.status.setText)
         self._worker.result_ready.connect(self._render)
         self._worker.failed.connect(self._failed)
@@ -477,6 +477,7 @@ class MainWindow(QMainWindow):
         self._worker = None
         self._set_busy(False)
         if worker is not None:
+            worker.wait()  # Qt finished has been emitted; join before queued disposal
             worker.deleteLater()
 
     def _failed(self, message: str):

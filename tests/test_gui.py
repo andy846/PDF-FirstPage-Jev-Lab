@@ -8,6 +8,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 PySide6 = pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 
 from firstpage_jev_lab.demo import make_demo
@@ -18,7 +19,18 @@ from firstpage_jev_lab.jev import MockClassifier
 
 @pytest.fixture(scope="module")
 def app():
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    yield app
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
+    app.quit()
+
+
+def dispose_window(window, app):
+    window.close()
+    window.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
 @pytest.fixture
@@ -89,7 +101,7 @@ def test_window_creation_selection_and_model(app, synthetic):
         assert window.result is None
         assert not window.export_button.isEnabled()
     finally:
-        window.close()
+        dispose_window(window, app)
 
 
 def test_background_thread_keeps_gui_responsive(app, synthetic):
@@ -109,7 +121,7 @@ def test_background_thread_keeps_gui_responsive(app, synthetic):
         assert window.result.ground_truth["exact_match"]
         assert window.run_button.isEnabled()
     finally:
-        window.close()
+        dispose_window(window, app)
 
 
 def test_jev_requires_key_and_user_approval(app, synthetic, monkeypatch):
@@ -130,4 +142,4 @@ def test_jev_requires_key_and_user_approval(app, synthetic, monkeypatch):
         assert not window.consent.isChecked()
         assert window._request().allow_external_text is False
     finally:
-        window.close()
+        dispose_window(window, app)
