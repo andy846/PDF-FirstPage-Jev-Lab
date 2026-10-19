@@ -1,7 +1,9 @@
 """All tests are synthetic and offline; no real Jev API calls."""
 import csv
+import io
 import json
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
@@ -11,6 +13,7 @@ from firstpage_jev_lab.jev import (JevClassifier, MockClassifier, OFFICIAL_ENDPO
                                    OPENCODE_ENDPOINT, USER_AGENT, redact, _parse_answer)
 from firstpage_jev_lab.openrouter import OpenRouterClassifier
 from firstpage_jev_lab.rules import Rule, evaluate, make_index, matches, mine
+from firstpage_jev_lab.transport import model_matches
 from firstpage_jev_lab.cli import main
 
 
@@ -93,17 +96,31 @@ def test_opencode_gateway_key_endpoint_and_model_resolution(monkeypatch):
                                                            OPENCODE_ENDPOINT)
     monkeypatch.delenv("JEV_ENDPOINT")
     monkeypatch.delenv("JEV_MODEL")
+    monkeypatch.delenv("OPENCODE_API_KEY")
     assert JevClassifier(key="k", allow_external_text=True).endpoint == OFFICIAL_ENDPOINT
+
+
+def test_opencode_only_key_selects_matching_endpoint_and_model(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("JEV_ENDPOINT", raising=False)
+    monkeypatch.delenv("JEV_MODEL", raising=False)
+    monkeypatch.setenv("OPENCODE_API_KEY", "SYNTHETIC_TEST_ONLY")
+    client = JevClassifier(allow_external_text=True, transport=lambda payload: {"answers": {}})
+    assert client.endpoint == OPENCODE_ENDPOINT
+    assert client.model == "jev-1.13"
 
 
 def test_jev_request_and_response_contract_offline(fixture, monkeypatch):
     monkeypatch.delenv("JEV_MODEL", raising=False)
     monkeypatch.delenv("JEV_ENDPOINT", raising=False)
+    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     _, _, pages = fixture
     requests = []
     def fake_api(payload):
         requests.append(payload)
-        return {"answers": {k: {"type": "noul", "noul": .93 if int(k[5:]) == 1 else .04}
+        return {"model": "jev-1.13.0", "provider": "TypeSafe",
+                "answers": {k: {"type": "noul", "noul": .93 if int(k[5:]) == 1 else .04}
                             for k in payload["questions"]}}
     client = JevClassifier(key="fake-key", allow_external_text=True, transport=fake_api)
     answer = client.classify(pages[:3], batch_size=2)
@@ -112,6 +129,8 @@ def test_jev_request_and_response_contract_offline(fixture, monkeypatch):
     assert requests[0]["questions"]["page_1"]["type"] == "noul"
     assert requests[0]["model"] == "jev-1.13.0"
     assert requests[0]["state"]["pages"][0]["page"] == 1
+    assert client.served_models == ["jev-1.13.0"]
+    assert client.providers == ["TypeSafe"]
 
 
 def test_http_sends_identifying_user_agent(monkeypatch):
@@ -131,10 +150,59 @@ def test_http_sends_identifying_user_agent(monkeypatch):
         captured["request"] = request
         return FakeResponse()
 
-    monkeypatch.setattr("firstpage_jev_lab.jev.urlopen", fake_urlopen)
+    monkeypatch.setattr("firstpage_jev_lab.transport.urlopen", fake_urlopen)
     client = JevClassifier(key="k", allow_external_text=True)
     assert client._http({"model": client.model, "questions": {}}) == {"answers": {}}
     assert captured["request"].get_header("User-agent") == USER_AGENT
+
+
+def test_transport_retries_transient_errors(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self):
+            return b'{"answers": {}}'
+
+    def fake_urlopen(request, timeout=0):
+        calls.append(request)
+        if len(calls) == 1:
+            raise HTTPError(request.full_url, 503, "busy", {}, io.BytesIO(b'{"error": {"type": "Busy"}}'))
+        return FakeResponse()
+
+    monkeypatch.setattr("firstpage_jev_lab.transport.urlopen", fake_urlopen)
+    monkeypatch.setattr("firstpage_jev_lab.transport.time.sleep", lambda _seconds: None)
+    client = JevClassifier(key="k", allow_external_text=True)
+    assert client._http({"model": client.model, "questions": {}}) == {"answers": {}}
+    assert len(calls) == 2
+
+
+def test_transport_4xx_not_retried_and_reports_only_structured_code(monkeypatch):
+    calls = []
+
+    def fake_urlopen(request, timeout=0):
+        calls.append(request)
+        raise HTTPError(request.full_url, 400, "bad", {},
+                        io.BytesIO(b'{"error": {"type": "InvalidRequest", "message": "secret customer text"}}'))
+
+    monkeypatch.setattr("firstpage_jev_lab.transport.urlopen", fake_urlopen)
+    monkeypatch.setattr("firstpage_jev_lab.transport.time.sleep", lambda _seconds: None)
+    client = OpenRouterClassifier(key="k", allow_external_text=True)
+    with pytest.raises(RuntimeError, match="InvalidRequest") as caught:
+        client._http({"model": "m"})
+    assert "secret customer text" not in str(caught.value)
+    assert len(calls) == 1
+
+
+def test_model_matches_pinned_versions():
+    assert model_matches("typesafe/jev-1.14", ["typesafe/jev-1.14-20261014"])
+    assert model_matches("jev-1.13-free", ["jev-1.13-free"])
+    assert not model_matches("typesafe/jev-router", ["z-ai/glm-5.3-flash"])
 
 
 def test_openrouter_classifier_offline_contract(fixture, monkeypatch):
@@ -144,7 +212,8 @@ def test_openrouter_classifier_offline_contract(fixture, monkeypatch):
     requests = []
     def fake_api(payload):
         requests.append(payload)
-        return {"answers": {k: {"type": "noul", "noul": .91 if int(k[5:]) == 1 else .06}
+        return {"model": "typesafe/jev-1.14-20261014", "provider": "TypeSafe",
+                "answers": {k: {"type": "noul", "noul": .91 if int(k[5:]) == 1 else .06}
                             for k in payload["questions"]}}
     client = OpenRouterClassifier(key="fake-key", allow_external_text=True, transport=fake_api)
     answer = client.classify(pages[:3], batch_size=2)
@@ -154,6 +223,8 @@ def test_openrouter_classifier_offline_contract(fixture, monkeypatch):
     assert requests[0]["questions"]["page_1"]["type"] == "noul"
     assert requests[0]["state"]["pages"][0]["page"] == 1
     assert client.endpoint.endswith("/api/alpha/decisions")
+    assert client.served_models == ["typesafe/jev-1.14-20261014"]
+    assert client.providers == ["TypeSafe"]
 
 
 def test_openrouter_requires_permission_and_key(monkeypatch):
@@ -203,6 +274,8 @@ def test_cli_offline_end_to_end(tmp_path):
     report = json.loads((out / "report.json").read_text(encoding="utf-8"))
     assert report["independent_ground_truth"]["exact_match"] is True
     assert report["status"] == "EXPERIMENTAL_NOT_PRODUCTION_APPROVED"
+    assert report["served_models"] == [] and report["providers"] == []
+    assert report["model_mismatch"] is False
     with (out / "candidate_index.csv").open(encoding="utf-8-sig") as stream:
         rows = list(csv.DictReader(stream))
     assert rows[0]["StartPage"] == "1"

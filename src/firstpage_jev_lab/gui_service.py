@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -66,6 +66,8 @@ class Experiment:
     groups: list[tuple[int, int]]
     starts: list[int]
     ground_truth: dict | None
+    served_models: list[str] = field(default_factory=list)
+    providers: list[str] = field(default_factory=list)
 
     @property
     def selected(self) -> Candidate:
@@ -75,6 +77,8 @@ class Experiment:
         return {
             "status": "EXPERIMENTAL_NOT_PRODUCTION_APPROVED",
             "backend": self.request.backend,
+            "served_models": self.served_models,
+            "providers": self.providers,
             "pdf_page_count": self.page_count,
             "sample_count": len(self.sampled),
             "pseudo_labels_are_not_ground_truth": True,
@@ -142,7 +146,9 @@ def run_experiment(request: Request, progress: Callable[[str], None] | None = No
     comparison = evaluate(starts, truth) if truth is not None else None
     stage("Candidate report ready. Not approved for production.")
     return Experiment(request, len(pages), [p.number for p in sample], probabilities,
-                      candidates, selected_rank, groups, starts, comparison)
+                      candidates, selected_rank, groups, starts, comparison,
+                      served_models=list(getattr(classifier, "served_models", [])),
+                      providers=list(getattr(classifier, "providers", [])))
 
 
 def export_experiment(result: Experiment, directory: str | Path) -> Path:

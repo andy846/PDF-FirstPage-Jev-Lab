@@ -62,6 +62,7 @@ def test_service_mock_full_scan_and_exports(synthetic, tmp_path):
     assert result.starts == starts
     assert result.ground_truth["exact_match"] is True
     assert result.report()["status"] == "EXPERIMENTAL_NOT_PRODUCTION_APPROVED"
+    assert result.report()["served_models"] == [] and result.report()["providers"] == []
     out = export_experiment(result, tmp_path / "results")
     assert (out / "candidate_index.csv").is_file()
     assert (out / "sample_decisions.csv").is_file()

@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 from pathlib import Path
 
 from .demo import make_demo
@@ -12,6 +13,7 @@ from .jev import JevClassifier, MockClassifier
 from .openrouter import OpenRouterClassifier
 from .pdftext import extract_pages, select_sample
 from .rules import evaluate, make_index, mine
+from .transport import model_matches
 
 
 def _write_csv(path: Path, header: list[str], rows):
@@ -68,8 +70,13 @@ def analyze(args):
     with (out / "candidate_detection_config.json").open("w", encoding="utf-8") as f:
         json.dump(best.rule.to_detection_config(), f, indent=2, ensure_ascii=False)
     truth = _ground_truth(Path(args.ground_truth) if args.ground_truth else None, len(pages))
+    served_models = list(getattr(classifier, "served_models", []))
+    providers = list(getattr(classifier, "providers", []))
+    model_mismatch = bool(served_models) and not model_matches(model, served_models)
     report = {"status": "EXPERIMENTAL_NOT_PRODUCTION_APPROVED", "backend": args.backend,
               "model": model,
+              "served_models": served_models, "providers": providers,
+              "model_mismatch": model_mismatch,
               "pdf_page_count": len(pages), "sample_count": len(sample),
               "pseudo_label_warning": "Model/mocked probabilities are NOT independently verified ground truth.",
               "candidate_rule": best.to_dict(), "candidate_envelope_count": len(groups),
@@ -79,6 +86,8 @@ def analyze(args):
                               "No production authorization", "Possible missed document types outside sample",
                               "External upload requires explicit opt-in; redaction is not guaranteed"]}
     (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False)+"\n", encoding="utf-8")
+    if model_mismatch:
+        print(f"Warning: requested model {model!r} but the provider served {served_models!r}.", file=sys.stderr)
     print(json.dumps({"output": str(out), "experimental": True,
                       "best_rule": best.rule.as_dict(), "mailpieces": len(groups),
                       "ground_truth_exact": report["independent_ground_truth"]["exact_match"] if truth else None},

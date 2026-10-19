@@ -15,7 +15,7 @@ firstpage-lab-gui
 
 On Windows PowerShell, activate using .venv\Scripts\Activate.ps1 instead. Full setup and UI guide: [docs/GUI.md](docs/GUI.md).
 
-**Recommended first test:** Click Create 20-page demo, then Analyze PDF in Mock mode. Mock classification is NOT Jev accuracy evidence. Real external API integration has not been verified.
+**Recommended first test:** Click Create 20-page demo, then Analyze PDF in Mock mode. Mock classification is NOT Jev accuracy evidence. The external Jev backends have only been smoke-tested on the synthetic fixture; real customer documents remain unverified.
 
 ## Goal
 
@@ -63,7 +63,7 @@ firstpage-lab analyze samples/synthetic.pdf --backend jev --allow-external-text 
 
 For Windows PowerShell, set the API key in a session environment variable. Do not store a real key in the repository.
 
-The adapter calls the TypeSafe System One API and batches a noul question for each sampled page. **The live Jev integration has NOT been tested with a real Jev account.** The request format and returned decisions must still be verified. API calls can incur costs.
+The adapter batches a noul question for each sampled page. Live calls have been exercised against OpenCode-hosted `jev-1.13-free` and OpenRouter-hosted `typesafe/jev-1.14` on the synthetic fixture only; accuracy on real customer documents remains unverified. Requests are retried on 429/5xx responses, and reports record the model and provider actually served. API calls can incur costs.
 
 ### OpenCode-hosted Jev
 
@@ -77,6 +77,8 @@ firstpage-lab analyze samples/synthetic.pdf --backend jev --allow-external-text 
 ~~~
 
 `jev-1.13-free` is free while available; OpenCode refuses free models on networks it flags as abusive (VPN/datacenter IPs). The paid `jev-1.13` requires workspace credit.
+
+When only `OPENCODE_API_KEY` is set, the endpoint and model default to the OpenCode gateway and `jev-1.13`. Set `JEV_ENDPOINT`/`JEV_MODEL` explicitly to override.
 
 ### OpenRouter-hosted Jev 1.14
 

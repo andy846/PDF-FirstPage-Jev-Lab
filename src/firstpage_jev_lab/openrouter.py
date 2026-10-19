@@ -7,13 +7,11 @@ probabilities, never verified ground truth.
 """
 from __future__ import annotations
 
-import json
 import os
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from .jev import TASK_INSTRUCTIONS, _parse_answer, page_question, redact
 from .pdftext import PageText
+from .transport import note_metadata, post_json
 
 OFFICIAL_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 DEFAULT_MODEL = "typesafe/jev-1.14"
@@ -30,20 +28,15 @@ class OpenRouterClassifier:
             raise ValueError("Set OPENROUTER_API_KEY for OpenRouter (never put it in source code).")
         self.model = model or os.getenv("OPENROUTER_MODEL") or DEFAULT_MODEL
         self.endpoint = endpoint or os.getenv("OPENROUTER_ENDPOINT") or OFFICIAL_ENDPOINT
+        self.served_models: list[str] = []
+        self.providers: list[str] = []
         self.transport = transport or self._http
 
     def _http(self, payload: dict) -> dict:
-        request = Request(self.endpoint, data=json.dumps(payload).encode("utf-8"), method="POST",
-                          headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
-                                   "User-Agent": USER_AGENT, "X-Title": "PDF FirstPage Jev Lab"})
-        try:
-            with urlopen(request, timeout=60) as response:
-                return json.load(response)
-        except HTTPError as err:
-            # Do not reveal provider error response; it may echo customer content.
-            raise RuntimeError(f"OpenRouter HTTP {err.code}; no decisions recorded.") from None
-        except URLError:
-            raise RuntimeError("Unable to reach OpenRouter; no decisions recorded.") from None
+        return post_json(self.endpoint, payload,
+                         {"Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
+                          "User-Agent": USER_AGENT, "X-Title": "PDF FirstPage Jev Lab"},
+                         timeout=60, label="OpenRouter")
 
     def classify(self, pages: list[PageText], *, batch_size: int = 5,
                  chars_per_page: int = 1800) -> dict[int, float]:
@@ -59,6 +52,7 @@ class OpenRouterClassifier:
                 "questions": {f"page_{p.number}": page_question(p.number) for p in batch},
             }
             data = self.transport(payload)
+            note_metadata(data, self.served_models, self.providers)
             answers = data.get("answers") if isinstance(data, dict) else None
             if not isinstance(answers, dict):
                 raise ValueError("OpenRouter returned no answers. Results not recorded.")
@@ -66,5 +60,5 @@ class OpenRouterClassifier:
                 key = f"page_{p.number}"
                 if key not in answers:
                     raise ValueError(f"Missing OpenRouter decision for source page {p.number}.")
-                output[p.number] = _parse_answer(answers[key])
+                output[p.number] = _parse_answer(answers[key], label="OpenRouter")
         return output
