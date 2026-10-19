@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-firstpage-jev-lab"
+version = "0.1.0"
+description = "Standalone experimental Jev-assisted first-page detection and deterministic rule distillation for text PDFs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["PyMuPDF>=1.25,<2"]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+
+[project.scripts]
+firstpage-lab = "firstpage_jev_lab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
