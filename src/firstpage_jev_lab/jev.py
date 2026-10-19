@@ -11,7 +11,17 @@ from urllib.request import Request, urlopen
 from .pdftext import PageText
 
 OFFICIAL_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
+# OpenCode Console serves the same System One model, including the free jev-1.13-free tier.
+OPENCODE_ENDPOINT = "https://opencode.ai/inference/systemone/v1/systemone"
+DEFAULT_MODEL = "jev-1.13.0"
+# Cloudflare fronts the OpenCode gateway and bans the default Python-urllib signature (error 1010).
+USER_AGENT = "pdf-firstpage-jev-lab/0.2.0 (+https://github.com/andy846/PDF-FirstPage-Jev-Lab)"
 PAGE_COUNTER = re.compile(r"\b(?:page\s*)?1\s*(?:of|/)\s*\d{1,4}\b", re.I)
+
+
+def resolve_api_key() -> str | None:
+    """Official TypeSafe key, or an OpenCode Console service key for the same model."""
+    return os.getenv("TYPESAFE_API_KEY") or os.getenv("OPENCODE_API_KEY")
 
 
 def redact(text: str) -> str:
@@ -33,19 +43,21 @@ def _parse_answer(answer: dict) -> float:
 
 
 class JevClassifier:
-    def __init__(self, *, key: str | None = None, model: str = "jev-1.13.0",
-                 allow_external_text: bool = False, transport=None):
+    def __init__(self, *, key: str | None = None, model: str | None = None,
+                 allow_external_text: bool = False, transport=None, endpoint: str | None = None):
         if not allow_external_text:
             raise ValueError("Jev requires explicit --allow-external-text permission.")
-        self.key = key or os.getenv("TYPESAFE_API_KEY")
+        self.key = key or resolve_api_key()
         if not self.key:
-            raise ValueError("Set TYPESAFE_API_KEY for the Jev API (never put it in source code).")
-        self.model = model
+            raise ValueError("Set TYPESAFE_API_KEY (or OPENCODE_API_KEY) for the Jev API (never put it in source code).")
+        self.model = model or os.getenv("JEV_MODEL") or DEFAULT_MODEL
+        self.endpoint = endpoint or os.getenv("JEV_ENDPOINT") or OFFICIAL_ENDPOINT
         self.transport = transport or self._http
 
     def _http(self, payload: dict) -> dict:
-        request = Request(OFFICIAL_ENDPOINT, data=json.dumps(payload).encode("utf-8"), method="POST",
-                          headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
+        request = Request(self.endpoint, data=json.dumps(payload).encode("utf-8"), method="POST",
+                          headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json",
+                                   "User-Agent": USER_AGENT})
         try:
             with urlopen(request, timeout=35) as response:
                 return json.load(response)

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from .demo import make_demo
 from .gui_service import Experiment, Request, export_experiment, run_experiment
+from .jev import resolve_api_key
 
 STYLESHEET = """
 QMainWindow, QWidget#root { background: #111821; color: #edf3f9; }
@@ -249,12 +250,13 @@ class MainWindow(QMainWindow):
         self.backend_combo = QComboBox()
         self.backend_combo.addItem("Mock • Fully offline", "mock")
         self.backend_combo.addItem("Jev • TypeSafe external API", "jev")
+        self.backend_combo.addItem("OpenRouter • Jev Router external API", "openrouter")
         self.backend_combo.currentIndexChanged.connect(self._update_backend)
         ai_col.addWidget(self.backend_combo)
         self.api_status = _small_label("", muted=True)
         self.api_status.setWordWrap(True)
         ai_col.addWidget(self.api_status)
-        self.consent = QCheckBox("I have permission to send redacted PDF-derived text to TypeSafe.")
+        self.consent = QCheckBox("I have permission to send redacted PDF-derived text to the selected external API.")
         self.consent.setChecked(False)
         ai_col.addWidget(self.consent)
         self.security_note = _small_label(
@@ -361,15 +363,23 @@ class MainWindow(QMainWindow):
         self._invalidate()
 
     def _update_backend(self, *_args):
-        live = self.backend_combo.currentData() == "jev"
+        backend = self.backend_combo.currentData()
+        live = backend != "mock"
         self.consent.setVisible(live)
         self.security_note.setVisible(live)
         self.consent.setChecked(False)
-        self.api_status.setText(
-            "TYPESAFE_API_KEY detected in environment; key never displayed or saved."
-            if live and os.getenv("TYPESAFE_API_KEY")
-            else "TYPESAFE_API_KEY missing. Set it in the shell before launching."
-            if live else "Mock is a deterministic fixture heuristic, not actual Jev predictions.")
+        if not live:
+            self.api_status.setText("Mock is a deterministic fixture heuristic, not actual Jev predictions.")
+        elif backend == "jev":
+            self.api_status.setText(
+                "Jev API key detected in environment; key never displayed or saved."
+                if resolve_api_key()
+                else "TYPESAFE_API_KEY (or OPENCODE_API_KEY) missing. Set one in the shell before launching.")
+        else:
+            self.api_status.setText(
+                "OpenRouter API key detected in environment; key never displayed or saved."
+                if os.getenv("OPENROUTER_API_KEY")
+                else "OPENROUTER_API_KEY missing. Set it in the shell before launching.")
         self._invalidate()
 
     def _invalidate(self):
@@ -427,16 +437,18 @@ class MainWindow(QMainWindow):
         if not path or not Path(path).is_file():
             raise ValueError("Select a valid PDF first, or create the synthetic demo.")
         backend = self.backend_combo.currentData()
-        if backend == "jev":
-            if not os.getenv("TYPESAFE_API_KEY"):
-                raise ValueError("Set TYPESAFE_API_KEY in the environment, then restart this GUI.")
+        if backend != "mock":
+            if backend == "jev" and not resolve_api_key():
+                raise ValueError("Set TYPESAFE_API_KEY or OPENCODE_API_KEY in the environment, then restart this GUI.")
+            if backend == "openrouter" and not os.getenv("OPENROUTER_API_KEY"):
+                raise ValueError("Set OPENROUTER_API_KEY in the environment, then restart this GUI.")
             if not self.consent.isChecked():
                 raise ValueError("External text transfer requires the explicit approval checkbox.")
         return Request(
             pdf=path, backend=backend, sampling=self.sample_combo.currentData(),
             sample_count=self.sample_size.value(), custom_ranges=self.range_input.text().strip(),
             ground_truth=self.truth_line.text().strip(),
-            allow_external_text=backend == "jev" and self.consent.isChecked())
+            allow_external_text=backend != "mock" and self.consent.isChecked())
 
     def start_analysis(self):
         if self._worker is not None:
@@ -508,7 +520,7 @@ class MainWindow(QMainWindow):
             for i, (start, end) in enumerate(result.groups, 1)])
         self.export_button.setEnabled(True)
         self.result_hint.setText(
-            "Mock probabilities are synthetic heuristics; Jev scores are uncalibrated. "
+            "Mock probabilities are synthetic heuristics; model scores are uncalibrated. "
             "Rule metrics compare pseudo-labels only. Even a ground-truth match here is a lab test, "
             "not a production authorization.")
         if result.sampled:

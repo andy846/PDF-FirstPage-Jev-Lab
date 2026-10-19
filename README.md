@@ -65,6 +65,30 @@ For Windows PowerShell, set the API key in a session environment variable. Do no
 
 The adapter calls the TypeSafe System One API and batches a noul question for each sampled page. **The live Jev integration has NOT been tested with a real Jev account.** The request format and returned decisions must still be verified. API calls can incur costs.
 
+### OpenCode-hosted Jev
+
+OpenCode Console serves the same System One model at `https://opencode.ai/inference/systemone/v1/systemone`. Use an OpenCode Console service key (`oc_sk_...`) with the endpoint override:
+
+~~~sh
+export OPENCODE_API_KEY='oc_sk_...'
+export JEV_ENDPOINT='https://opencode.ai/inference/systemone/v1/systemone'
+export JEV_MODEL='jev-1.13-free'
+firstpage-lab analyze samples/synthetic.pdf --backend jev --allow-external-text --sample-count 20 --out outputs/opencode-demo
+~~~
+
+`jev-1.13-free` is free while available; OpenCode refuses free models on networks it flags as abusive (VPN/datacenter IPs). The paid `jev-1.13` requires workspace credit.
+
+### OpenRouter-hosted Jev Router
+
+The `openrouter` backend sends the same redacted page text through OpenRouter's Chat Completions API and parses strict-JSON per-page probabilities, using the `typesafe/jev-router` model by default:
+
+~~~sh
+export OPENROUTER_API_KEY='sk-or-v1-...'
+firstpage-lab analyze samples/synthetic.pdf --backend openrouter --allow-external-text --sample-count 20 --out outputs/openrouter-demo
+~~~
+
+Set `OPENROUTER_MODEL` to another OpenRouter model ID to compare models. Router pricing is dynamic per request; replies are uncalibrated pseudo-labels, never ground truth.
+
 **Never submit real eMPF, bank or other confidential customer PDF text without explicit security and contractual approval.** The simple demonstration redaction is best-effort only, not reliable DLP. Keys, real PDFs and results must remain outside GitHub.
 
 ## Sampling

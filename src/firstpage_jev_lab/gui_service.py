@@ -13,6 +13,7 @@ from typing import Callable
 
 from .cli import _ground_truth, _write_csv
 from .jev import JevClassifier, MockClassifier
+from .openrouter import OpenRouterClassifier
 from .pdftext import PageText, extract_pages, select_sample
 from .rules import Candidate, evaluate, make_index, mine
 
@@ -92,9 +93,9 @@ def run_experiment(request: Request, progress: Callable[[str], None] | None = No
         if progress:
             progress(s)
 
-    if request.backend not in {"mock", "jev"}:
+    if request.backend not in {"mock", "jev", "openrouter"}:
         raise ValueError("Unknown decision backend.")
-    if request.backend == "jev" and not request.allow_external_text:
+    if request.backend != "mock" and not request.allow_external_text:
         raise ValueError("Explicit external text upload approval is required.")
     if request.sampling not in {"first", "distributed", "custom"}:
         raise ValueError("Unsupported sampling method.")
@@ -109,8 +110,9 @@ def run_experiment(request: Request, progress: Callable[[str], None] | None = No
             raise ValueError("Sample size must be between 3 and 200.")
         sample = select_sample(pages, request.sample_count, request.sampling)
     if classifier is None:
-        classifier = (MockClassifier() if request.backend == "mock"
-                      else JevClassifier(allow_external_text=True))
+        classifier = (MockClassifier() if request.backend == "mock" else
+                      JevClassifier(allow_external_text=True) if request.backend == "jev" else
+                      OpenRouterClassifier(allow_external_text=True))
     stage(f"Classifying {len(sample)} sample pages with {request.backend.upper()}...")
     probabilities = classifier.classify(sample)
     if set(probabilities) != {p.number for p in sample}:
@@ -146,7 +148,8 @@ def run_experiment(request: Request, progress: Callable[[str], None] | None = No
 def export_experiment(result: Experiment, directory: str | Path) -> Path:
     path = Path(directory)
     path.mkdir(parents=True, exist_ok=True)
-    origin = "MOCK_HEURISTIC" if result.request.backend == "mock" else "JEV_API_UNCALIBRATED"
+    origin = {"mock": "MOCK_HEURISTIC", "jev": "JEV_API_UNCALIBRATED",
+              "openrouter": "OPENROUTER_API_UNCALIBRATED"}[result.request.backend]
     _write_csv(path / "sample_decisions.csv",
                ["SourcePage", "FirstPageProbability", "Origin"],
                [[n, result.probabilities[n], origin] for n in result.sampled])

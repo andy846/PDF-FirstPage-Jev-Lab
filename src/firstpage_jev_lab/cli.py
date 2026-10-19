@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .demo import make_demo
 from .jev import JevClassifier, MockClassifier
+from .openrouter import OpenRouterClassifier
 from .pdftext import extract_pages, select_sample
 from .rules import evaluate, make_index, mine
 
@@ -34,22 +35,29 @@ def _ground_truth(path: Path | None, page_count: int) -> set[int] | None:
 
 
 def analyze(args):
-    if args.backend == "jev" and not args.allow_external_text:
-        raise ValueError("Jev upload is disabled by default. Pass --allow-external-text only for approved/synthetic documents.")
+    if args.backend != "mock" and not args.allow_external_text:
+        raise ValueError("External upload is disabled by default. Pass --allow-external-text only for approved/synthetic documents.")
     pages = extract_pages(args.pdf)
     sample = select_sample(pages, args.sample_count, args.sampling)
     classifier = (MockClassifier() if args.backend == "mock" else
                   JevClassifier(key=os.getenv("TYPESAFE_API_KEY"),
                                 model=os.getenv("JEV_MODEL", "jev-1.13.0"),
-                                allow_external_text=args.allow_external_text))
+                                allow_external_text=args.allow_external_text) if args.backend == "jev" else
+                  OpenRouterClassifier(key=os.getenv("OPENROUTER_API_KEY"),
+                                       model=os.getenv("OPENROUTER_MODEL", "typesafe/jev-router"),
+                                       allow_external_text=args.allow_external_text))
     probabilities = classifier.classify(sample)
     candidates = mine(sample, probabilities)
     if not candidates:
         raise ValueError("No usable rule candidates. Need more representative labeled samples.")
+    origin = {"mock": "MOCK_HEURISTIC", "jev": "JEV_API", "openrouter": "OPENROUTER_API"}[args.backend]
+    model = {"mock": "MOCK_ONLY",
+             "jev": os.getenv("JEV_MODEL", "jev-1.13.0"),
+             "openrouter": os.getenv("OPENROUTER_MODEL", "typesafe/jev-router")}[args.backend]
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     _write_csv(out / "sample_decisions.csv", ["SourcePage", "FirstPageProbability", "Origin"],
-               [[p.number, probabilities[p.number], "MOCK_HEURISTIC" if args.backend == "mock" else "JEV_API"] for p in sample])
+               [[p.number, probabilities[p.number], origin] for p in sample])
     _write_csv(out / "rule_candidates.csv", ["Rank", "Kind", "Term", "RegionMM", "TP", "FP", "FN", "TN", "Precision", "Recall"],
                [[i, c.rule.kind, c.rule.term or "", str(c.rule.region_mm or ""), c.tp, c.fp, c.fn, c.tn,
                  round(c.precision, 4), round(c.recall, 4)] for i, c in enumerate(candidates, 1)])
@@ -61,7 +69,7 @@ def analyze(args):
         json.dump(best.rule.to_detection_config(), f, indent=2, ensure_ascii=False)
     truth = _ground_truth(Path(args.ground_truth) if args.ground_truth else None, len(pages))
     report = {"status": "EXPERIMENTAL_NOT_PRODUCTION_APPROVED", "backend": args.backend,
-              "model": os.getenv("JEV_MODEL", "jev-1.13.0") if args.backend == "jev" else "MOCK_ONLY",
+              "model": model,
               "pdf_page_count": len(pages), "sample_count": len(sample),
               "pseudo_label_warning": "Model/mocked probabilities are NOT independently verified ground truth.",
               "candidate_rule": best.to_dict(), "candidate_envelope_count": len(groups),
@@ -84,12 +92,13 @@ def main(argv=None):
     make.add_argument("--out", default="samples/synthetic.pdf")
     run = commands.add_parser("analyze", help="Classify sample, mine a rule, and scan entire PDF")
     run.add_argument("pdf")
-    run.add_argument("--backend", choices=("mock", "jev"), default="mock")
+    run.add_argument("--backend", choices=("mock", "jev", "openrouter"), default="mock")
     run.add_argument("--sampling", choices=("first", "distributed"), default="first")
     run.add_argument("--sample-count", type=int, default=20)
     run.add_argument("--out", default="outputs/trial")
     run.add_argument("--ground-truth", help="Independent CSV with StartPage column")
-    run.add_argument("--allow-external-text", action="store_true", help="Explicit approval for text upload to TypeSafe Jev")
+    run.add_argument("--allow-external-text", action="store_true",
+                     help="Explicit approval for text upload to the external model API")
     args = parser.parse_args(argv)
     try:
         if args.command == "make-demo":

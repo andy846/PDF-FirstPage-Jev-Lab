@@ -131,6 +131,7 @@ def test_jev_requires_key_and_user_approval(app, synthetic, monkeypatch):
         window.set_source(str(pdf))
         window.backend_combo.setCurrentIndex(1)
         monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+        monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
         with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
             window._request()
         monkeypatch.setenv("TYPESAFE_API_KEY", "SYNTHETIC_TEST_ONLY")
@@ -141,5 +142,25 @@ def test_jev_requires_key_and_user_approval(app, synthetic, monkeypatch):
         window.backend_combo.setCurrentIndex(0)
         assert not window.consent.isChecked()
         assert window._request().allow_external_text is False
+    finally:
+        dispose_window(window, app)
+
+
+def test_openrouter_requires_key_and_user_approval(app, synthetic, monkeypatch):
+    pdf, _, _ = synthetic
+    window = MainWindow()
+    try:
+        window.set_source(str(pdf))
+        window.backend_combo.setCurrentIndex(2)
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+            window._request()
+        monkeypatch.setenv("OPENROUTER_API_KEY", "SYNTHETIC_TEST_ONLY")
+        with pytest.raises(ValueError, match="approval"):
+            window._request()
+        window.consent.setChecked(True)
+        request = window._request()
+        assert request.backend == "openrouter"
+        assert request.allow_external_text is True
     finally:
         dispose_window(window, app)

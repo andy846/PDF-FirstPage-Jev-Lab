@@ -7,7 +7,9 @@ import pytest
 
 from firstpage_jev_lab.demo import make_demo
 from firstpage_jev_lab.pdftext import extract_pages, select_sample
-from firstpage_jev_lab.jev import JevClassifier, MockClassifier, redact, _parse_answer
+from firstpage_jev_lab.jev import (JevClassifier, MockClassifier, OFFICIAL_ENDPOINT,
+                                   OPENCODE_ENDPOINT, USER_AGENT, redact, _parse_answer)
+from firstpage_jev_lab.openrouter import OpenRouterClassifier, parse_pages
 from firstpage_jev_lab.rules import Rule, evaluate, make_index, matches, mine
 from firstpage_jev_lab.cli import main
 
@@ -74,13 +76,29 @@ def test_missing_first_page_rejected(fixture):
 
 def test_jev_requires_explicit_external_upload(monkeypatch):
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.delenv("OPENCODE_API_KEY", raising=False)
     with pytest.raises(ValueError, match="permission"):
         JevClassifier(key="unused")
     with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
         JevClassifier(key="", allow_external_text=True)
 
 
-def test_jev_request_and_response_contract_offline(fixture):
+def test_opencode_gateway_key_endpoint_and_model_resolution(monkeypatch):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    monkeypatch.setenv("OPENCODE_API_KEY", "SYNTHETIC_TEST_ONLY")
+    monkeypatch.setenv("JEV_ENDPOINT", OPENCODE_ENDPOINT)
+    monkeypatch.setenv("JEV_MODEL", "jev-1.13-free")
+    client = JevClassifier(allow_external_text=True, transport=lambda payload: {"answers": {}})
+    assert (client.key, client.model, client.endpoint) == ("SYNTHETIC_TEST_ONLY", "jev-1.13-free",
+                                                           OPENCODE_ENDPOINT)
+    monkeypatch.delenv("JEV_ENDPOINT")
+    monkeypatch.delenv("JEV_MODEL")
+    assert JevClassifier(key="k", allow_external_text=True).endpoint == OFFICIAL_ENDPOINT
+
+
+def test_jev_request_and_response_contract_offline(fixture, monkeypatch):
+    monkeypatch.delenv("JEV_MODEL", raising=False)
+    monkeypatch.delenv("JEV_ENDPOINT", raising=False)
     _, _, pages = fixture
     requests = []
     def fake_api(payload):
@@ -94,6 +112,63 @@ def test_jev_request_and_response_contract_offline(fixture):
     assert requests[0]["questions"]["page_1"]["type"] == "noul"
     assert requests[0]["model"] == "jev-1.13.0"
     assert requests[0]["state"]["pages"][0]["page"] == 1
+
+
+def test_http_sends_identifying_user_agent(monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self):
+            return b'{"answers": {}}'
+
+    def fake_urlopen(request, timeout=0):
+        captured["request"] = request
+        return FakeResponse()
+
+    monkeypatch.setattr("firstpage_jev_lab.jev.urlopen", fake_urlopen)
+    client = JevClassifier(key="k", allow_external_text=True)
+    assert client._http({"model": client.model, "questions": {}}) == {"answers": {}}
+    assert captured["request"].get_header("User-agent") == USER_AGENT
+
+
+def test_openrouter_classifier_offline_contract(fixture, monkeypatch):
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("OPENROUTER_ENDPOINT", raising=False)
+    _, _, pages = fixture
+    requests = []
+    def fake_api(payload):
+        requests.append(payload)
+        return {"choices": [{"message": {"content": '{"pages": {"1": 0.9, "2": 0.05, "3": 0.05}}'}}]}
+    client = OpenRouterClassifier(key="fake-key", allow_external_text=True, transport=fake_api)
+    answer = client.classify(pages[:3], batch_size=2)
+    assert answer == {1: .9, 2: .05, 3: .05}
+    assert len(requests) == 2
+    assert requests[0]["model"] == "typesafe/jev-router"
+    assert requests[0]["temperature"] == 0
+    assert requests[0]["messages"][0]["role"] == "system"
+    assert requests[0]["messages"][1]["content"].startswith("Page 1: ")
+
+
+def test_openrouter_requires_permission_and_key(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="permission"):
+        OpenRouterClassifier(key="unused")
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        OpenRouterClassifier(key="", allow_external_text=True)
+
+
+def test_openrouter_malformed_reply_rejected():
+    for content in [None, "", "no json here", "{}", '{"pages": {}}', '{"pages": []}',
+                    '{"pages": {"1": 1.5}}', '{"pages": {"x": 0.5}}', '{"pages": {"1": "high"}}']:
+        with pytest.raises(ValueError):
+            parse_pages(content)
+    assert parse_pages('```json\n{"pages": {"4": 0.75}}\n```') == {4: 0.75}
 
 
 def test_malformed_jev_output_rejected():
@@ -133,5 +208,13 @@ def test_cli_rejects_live_upload_by_default(fixture, tmp_path):
     pdf, *_ = fixture
     with pytest.raises(SystemExit) as caught:
         main(["analyze", str(pdf), "--backend", "jev", "--out", str(tmp_path / "out")])
+    assert caught.value.code == 2
+    assert not (tmp_path / "out").exists()
+
+
+def test_cli_rejects_openrouter_upload_by_default(fixture, tmp_path):
+    pdf, *_ = fixture
+    with pytest.raises(SystemExit) as caught:
+        main(["analyze", str(pdf), "--backend", "openrouter", "--out", str(tmp_path / "out")])
     assert caught.value.code == 2
     assert not (tmp_path / "out").exists()
