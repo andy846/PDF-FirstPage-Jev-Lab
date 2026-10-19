@@ -2,6 +2,21 @@
 
 **Independent experimental prototype — NOT production-ready.** This repository does not change PDFDocuEdit Pro and must not be used to release actual customer mailpieces.
 
+## Desktop GUI (PySide6)
+
+A standalone desktop window now provides **Open PDF**, **Create synthetic demo**, first/distributed/custom samples, Mock/Jev selection, per-page first-page probabilities, candidate rules, envelope index, local source-page preview, optional independent ground-truth comparison and CSV/JSON export. The GUI runs analysis on a background worker. Live Jev text transfer is **disabled by default** and requires explicit consent and confirmation.
+
+~~~bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[gui,test]'
+firstpage-lab-gui
+~~~
+
+On Windows PowerShell, activate using .venv\Scripts\Activate.ps1 instead. Full setup and UI guide: [docs/GUI.md](docs/GUI.md).
+
+**Recommended first test:** Click Create 20-page demo, then Analyze PDF in Mock mode. Mock classification is NOT Jev accuracy evidence. Real external API integration has not been verified.
+
 ## Goal
 
 Test whether TypeSafe **Jev** can classify likely **first pages versus continuation pages** from representative pages of a PDF containing real selectable text, and whether deterministic Python code can distill those noisy classifications into reusable first-page detection rules.
