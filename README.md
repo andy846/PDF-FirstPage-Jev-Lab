@@ -93,6 +93,16 @@ firstpage-lab analyze samples/synthetic.pdf --backend openrouter --allow-externa
 
 **Never submit real eMPF, bank or other confidential customer PDF text without explicit security and contractual approval.** The simple demonstration redaction is best-effort only, not reliable DLP. Keys, real PDFs and results must remain outside GitHub.
 
+## Rule Miner v2: spatial features and pseudo-holdout checks
+
+The local miner now extracts repeated **static text markers**, short repeated phrases, and **position-clustered** rules. It also searches narrow page-counter regions for layouts with more than one printed counter. It does not use OCR or a second language model.
+
+Only confident Jev/Mock first and continuation predictions participate in discovery. With at least three candidate first pages and two continuation pages, one of each is **withheld before mining and ranking**, then evaluated later. The training and held-out pseudo-label metrics are **both comparisons against model pseudo-labels**, not verified envelope boundaries. Rule selection never inspects withheld pages.
+
+For verified accuracy, provide an independent StartPage CSV and inspect the independent_ground_truth section of report.json. A holdout disagreement is flagged in the GUI. Never automatically approve a detected profile. All text-derived candidate strings require manual inspection before saving, to avoid capturing customer details.
+
+The left sidebar now handles long dropdown options: shortened visible names, tooltip detail, width-constrained selectors and a wrapped external-transfer explanation. All external backends require explicit consent plus final confirmation.
+
 ## Sampling
 
 ~~~sh

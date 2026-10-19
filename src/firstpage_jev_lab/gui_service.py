@@ -84,6 +84,13 @@ class Experiment:
             "pseudo_labels_are_not_ground_truth": True,
             "selected_candidate_rank": self.selected_rank + 1,
             "selected_rule": self.selected.to_dict(),
+            "pseudo_holdout": self.selected.pseudo_holdout,
+            "pseudo_holdout_status": (
+                "DISAGREES_WITH_PSEUDO_LABELS" if self.selected.pseudo_holdout and
+                (self.selected.pseudo_holdout["fp"] or self.selected.pseudo_holdout["fn"]) else
+                "AGREES_WITH_PSEUDO_LABELS" if self.selected.pseudo_holdout else
+                "INSUFFICIENT_CONFIDENT_SAMPLES"),
+            "selection_basis": "training pseudo-labels only; holdout not used to rank rules",
             "candidate_envelopes": len(self.groups),
             "candidate_start_pages": self.starts,
             "independent_ground_truth": self.ground_truth,
@@ -160,9 +167,19 @@ def export_experiment(result: Experiment, directory: str | Path) -> Path:
                ["SourcePage", "FirstPageProbability", "Origin"],
                [[n, result.probabilities[n], origin] for n in result.sampled])
     _write_csv(path / "rule_candidates.csv",
-               ["Rank", "Kind", "Term", "RegionMM", "TP", "FP", "FN", "TN", "Precision", "Recall"],
-               [[i, c.rule.kind, c.rule.term or "", str(c.rule.region_mm or ""), c.tp, c.fp,
-                 c.fn, c.tn, round(c.precision, 4), round(c.recall, 4)]
+               ["Rank", "Kind", "Term", "RegionMM", "TP", "FP", "FN", "TN", "Precision",
+                "Recall", "TrainTP", "TrainFP", "TrainFN", "HoldoutTP", "HoldoutFP",
+                "HoldoutFN", "HoldoutFalseStartPages", "HoldoutMissedStartPages"],
+               [[i, c.rule.kind, c.rule.term or "", str(c.rule.region_mm or ""), c.tp,
+                 c.fp, c.fn, c.tn, round(c.precision, 4), round(c.recall, 4),
+                 c.training["tp"] if c.training else "",
+                 c.training["fp"] if c.training else "",
+                 c.training["fn"] if c.training else "",
+                 c.pseudo_holdout["tp"] if c.pseudo_holdout else "",
+                 c.pseudo_holdout["fp"] if c.pseudo_holdout else "",
+                 c.pseudo_holdout["fn"] if c.pseudo_holdout else "",
+                 str(c.pseudo_holdout["false_starts"]) if c.pseudo_holdout else "",
+                 str(c.pseudo_holdout["missed_starts"]) if c.pseudo_holdout else ""]
                 for i, c in enumerate(result.candidates, 1)])
     _write_csv(path / "candidate_index.csv",
                ["Envelope", "StartPage", "EndPage", "PageCount", "ReviewStatus"],

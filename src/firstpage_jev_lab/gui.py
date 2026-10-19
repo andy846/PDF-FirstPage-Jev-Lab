@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter,
+    QMessageBox, QProgressBar, QPushButton, QScrollArea, QSpinBox, QSplitter, QSizePolicy,
     QTabWidget, QTableView, QVBoxLayout, QWidget,
 )
 
@@ -195,8 +195,11 @@ class MainWindow(QMainWindow):
         left_scroll.setMinimumWidth(340)
         left_scroll.setMaximumWidth(465)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         left = QFrame()
         left.setObjectName("panel")
+        left.setMinimumWidth(0)
+        left.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         left_col = QVBoxLayout(left)
         left_col.setContentsMargins(18, 16, 18, 18)
         left_col.setSpacing(10)
@@ -227,6 +230,7 @@ class MainWindow(QMainWindow):
         sample_box = QGroupBox("02   SAMPLE STRATEGY")
         sample_col = QVBoxLayout(sample_box)
         self.sample_combo = QComboBox()
+        self._fit_sidebar_combo(self.sample_combo)
         self.sample_combo.addItem("First N pages", "first")
         self.sample_combo.addItem("Distributed across PDF", "distributed")
         self.sample_combo.addItem("Custom page ranges", "custom")
@@ -248,17 +252,25 @@ class MainWindow(QMainWindow):
         ai_box = QGroupBox("03   DECISION BACKEND")
         ai_col = QVBoxLayout(ai_box)
         self.backend_combo = QComboBox()
+        self._fit_sidebar_combo(self.backend_combo)
         self.backend_combo.addItem("Mock • Fully offline", "mock")
-        self.backend_combo.addItem("Jev • TypeSafe external API", "jev")
-        self.backend_combo.addItem("OpenRouter • Jev 1.14 external API", "openrouter")
+        self.backend_combo.addItem("Jev · TypeSafe", "jev")
+        self.backend_combo.addItem("OpenRouter · Jev 1.14", "openrouter")
+        self.backend_combo.setItemData(1, "Jev via official TypeSafe / OpenCode API", Qt.ItemDataRole.ToolTipRole)
+        self.backend_combo.setItemData(2, "OpenRouter · TypeSafe Jev 1.14 Decisions API", Qt.ItemDataRole.ToolTipRole)
+        self.backend_combo.setToolTip("Choose offline Mock, TypeSafe/OpenCode Jev, or OpenRouter Jev.")
         self.backend_combo.currentIndexChanged.connect(self._update_backend)
         ai_col.addWidget(self.backend_combo)
         self.api_status = _small_label("", muted=True)
         self.api_status.setWordWrap(True)
         ai_col.addWidget(self.api_status)
-        self.consent = QCheckBox("I have permission to send redacted PDF-derived text to the selected external API.")
+        self.consent = QCheckBox("I approve external text transfer")
+        self.consent.setToolTip("Approval applies only to the current external API experiment.")
         self.consent.setChecked(False)
         ai_col.addWidget(self.consent)
+        self.consent_details = _small_label("PDF-derived sample text will leave this computer.", muted=True)
+        self.consent_details.setWordWrap(True)
+        ai_col.addWidget(self.consent_details)
         self.security_note = _small_label(
             "Best-effort redaction is NOT a data-leak safeguard. Never use confidential "
             "customer documents without information-security approval.", muted=True)
@@ -303,7 +315,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.pred_table, self.pred_model = _table(["PDF page", "First page probability", "Interpretation"])
         self.rule_table, self.rule_model = _table(
-            ["Rank", "Rule", "Marker / Region", "Positive matches", "False-positive pseudo-labels", "Status"])
+            ["Rank", "Rule", "Marker / Region", "Training hits", "Pseudo holdout", "Status"])
         self.env_table, self.env_model = _table(["Envelope", "StartPage", "EndPage", "Pages", "Status"])
         self.pred_table.clicked.connect(self._preview_prediction_row)
         self.env_table.clicked.connect(self._preview_envelope_row)
@@ -356,6 +368,15 @@ class MainWindow(QMainWindow):
         layout.addLayout(footer)
         self._update_sampling()
 
+    @staticmethod
+    def _fit_sidebar_combo(combo):
+        # Qt normally uses its longest item as the minimum width. Prevent it
+        # from expanding beyond the scroll area (which has no horizontal bar).
+        combo.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        combo.setMinimumContentsLength(8)
+        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumWidth(0)
+
     def _update_sampling(self, *_args):
         custom = self.sample_combo.currentData() == "custom"
         self.range_input.setVisible(custom)
@@ -367,6 +388,7 @@ class MainWindow(QMainWindow):
         live = backend != "mock"
         self.consent.setVisible(live)
         self.security_note.setVisible(live)
+        self.consent_details.setVisible(live)
         self.consent.setChecked(False)
         if not live:
             self.api_status.setText("Mock is a deterministic fixture heuristic, not actual Jev predictions.")
@@ -458,10 +480,11 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             QMessageBox.warning(self, "Check experiment settings", str(error))
             return
-        if request.backend == "jev":
+        if request.backend != "mock":
+            provider_name = "OpenRouter" if request.backend == "openrouter" else "TypeSafe / OpenCode"
             confirmation = QMessageBox.warning(
                 self, "Transmit PDF-derived text outside this computer?",
-                "The selected PDF's sample text will be sent to TypeSafe's Jev API.\n\n"
+                f"The selected PDF's sample text will be sent to {provider_name}.\n\n"
                 "Best-effort redaction is NOT guaranteed to remove customer data. "
                 "Only approved or synthetic documents are permitted.\n\nContinue?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -513,14 +536,21 @@ class MainWindow(QMainWindow):
         self.rule_model.set_rows([
             [i, c.rule.kind, c.rule.term or
              (str(tuple(round(x, 1) for x in c.rule.region_mm)) if c.rule.region_mm else "Auto page counter"),
-             f"{c.tp}/{c.tp+c.fn}", str(c.fp), "ACTIVE" if i == result.selected_rank + 1 else "CANDIDATE"]
+             f"{c.training['tp']}/{c.training['tp']+c.training['fn']} (FP {c.training['fp']})" if c.training else "—",
+             (f"TP {c.pseudo_holdout['tp']} FP {c.pseudo_holdout['fp']} FN {c.pseudo_holdout['fn']}"
+              if c.pseudo_holdout else "Insufficient samples"),
+             "ACTIVE" if i == result.selected_rank + 1 else "CANDIDATE"]
             for i, c in enumerate(result.candidates, 1)])
         self.env_model.set_rows([
             [i, start, end, end-start+1, "EXPERIMENTAL"]
             for i, (start, end) in enumerate(result.groups, 1)])
         self.export_button.setEnabled(True)
+        held = result.selected.pseudo_holdout
+        holdout_note = ("Pseudo-holdout disagreements: "
+                        + str(held["fp"] + held["fn"]) + "." if held else
+                        "Insufficient confident sample pages for pseudo-holdout.")
         self.result_hint.setText(
-            "Mock probabilities are synthetic heuristics; model scores are uncalibrated. "
+            holdout_note + " " + "Mock probabilities are synthetic heuristics; model scores are uncalibrated. "
             "Rule metrics compare pseudo-labels only. Even a ground-truth match here is a lab test, "
             "not a production authorization.")
         if result.sampled:

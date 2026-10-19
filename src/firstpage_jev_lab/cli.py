@@ -12,7 +12,7 @@ from .demo import make_demo
 from .jev import JevClassifier, MockClassifier
 from .openrouter import OpenRouterClassifier
 from .pdftext import extract_pages, select_sample
-from .rules import evaluate, make_index, mine
+from .rules import evaluate, make_index, matches, mine
 from .transport import model_matches
 
 
@@ -34,6 +34,10 @@ def _ground_truth(path: Path | None, page_count: int) -> set[int] | None:
     if not starts or starts[0] != 1 or starts != sorted(set(starts)) or starts[-1] > page_count:
         raise ValueError("Ground truth StartPage must be unique, sorted, begin at 1 and be in range.")
     return set(starts)
+
+
+def matches_first_page(pages, candidate):
+    return bool(pages) and matches(pages[0], candidate.rule)
 
 
 def analyze(args):
@@ -60,10 +64,21 @@ def analyze(args):
     out.mkdir(parents=True, exist_ok=True)
     _write_csv(out / "sample_decisions.csv", ["SourcePage", "FirstPageProbability", "Origin"],
                [[p.number, probabilities[p.number], origin] for p in sample])
-    _write_csv(out / "rule_candidates.csv", ["Rank", "Kind", "Term", "RegionMM", "TP", "FP", "FN", "TN", "Precision", "Recall"],
+    _write_csv(out / "rule_candidates.csv",
+               ["Rank", "Kind", "Term", "RegionMM", "TP", "FP", "FN", "TN", "Precision", "Recall",
+                "TrainTP", "TrainFP", "TrainFN", "HoldoutTP", "HoldoutFP", "HoldoutFN"],
                [[i, c.rule.kind, c.rule.term or "", str(c.rule.region_mm or ""), c.tp, c.fp, c.fn, c.tn,
-                 round(c.precision, 4), round(c.recall, 4)] for i, c in enumerate(candidates, 1)])
-    best = candidates[0]
+                 round(c.precision, 4), round(c.recall, 4),
+                 c.training["tp"] if c.training else "",
+                 c.training["fp"] if c.training else "",
+                 c.training["fn"] if c.training else "",
+                 c.pseudo_holdout["tp"] if c.pseudo_holdout else "",
+                 c.pseudo_holdout["fp"] if c.pseudo_holdout else "",
+                 c.pseudo_holdout["fn"] if c.pseudo_holdout else ""]
+                for i, c in enumerate(candidates, 1)])
+    best = next((c for c in candidates[:12] if matches_first_page(pages, c)), None)
+    if best is None:
+        raise ValueError("No candidate rule matches source page 1. Review candidate evidence.")
     groups, starts = make_index(pages, best.rule)
     _write_csv(out / "candidate_index.csv", ["Envelope", "StartPage", "EndPage", "PageCount", "ReviewStatus"],
                [[i, a, b, b-a+1, "UNVERIFIED_EXPERIMENTAL"] for i, (a, b) in enumerate(groups, 1)])
@@ -80,6 +95,8 @@ def analyze(args):
               "pdf_page_count": len(pages), "sample_count": len(sample),
               "pseudo_label_warning": "Model/mocked probabilities are NOT independently verified ground truth.",
               "candidate_rule": best.to_dict(), "candidate_envelope_count": len(groups),
+              "pseudo_holdout": best.pseudo_holdout,
+              "selection_basis": "training pseudo-labels only; held-out pseudo-labels report-only",
               "candidate_source_start_pages": starts,
               "independent_ground_truth": evaluate(starts, truth) if truth is not None else None,
               "limitations": ["Only PDFs with embedded selectable text", "Only first_text/page_number candidates",

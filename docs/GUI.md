@@ -31,7 +31,7 @@ You may also run: python -m firstpage_jev_lab.gui
 1. Click **Create 20-page demo**. This creates a synthetic text PDF and known StartPage CSV in a machine temporary folder.
 2. Keep **First N pages**, **20**, and **Mock / Fully offline**.
 3. Click **Analyze PDF**. A background Qt worker performs analysis, avoiding a frozen GUI.
-4. Examine **Page decisions**, **Discovered rules**, and **Envelope index**. Select a row and open the **PDF preview** tab to inspect the source page.
+4. Examine **Page decisions**, **Discovered rules** (training hits and held-out pseudo-label disagreements), and **Envelope index**. Select a row and open the **PDF preview** tab to inspect the source page.
 5. Check **VERIFICATION**. MATCH means the proposed exact boundaries match the *supplied independent ground-truth CSV*; UNVERIFIED means no ground truth was provided.
 6. **Export CSV / JSON reports** into a directory you choose.
 
@@ -75,3 +75,12 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q
 ~~~
 
 CI installs the GUI extras and tests offscreen using synthetic documents only.
+
+## Rule discovery interpretation
+
+- Candidate rank is computed from training pseudo-labels only; held-out pseudo-label results never influence candidate selection.
+- If sample labels are sparse, the GUI reports "Insufficient samples" instead of inventing a holdout score.
+- Candidate regions use millimetre coordinates. Markers outside their regions are excluded.
+- No holdout errors does **not** prove mailpiece accuracy. Independently reviewed StartPage boundaries are needed to establish false-split/missed-start rates.
+- Review candidate literal strings for customer-specific information before saving a profile.
+- The sidebar shortens long backend names; hover for full tooltip descriptions.

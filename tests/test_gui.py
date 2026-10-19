@@ -9,7 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 PySide6 = pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QCoreApplication, QEvent
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy
 
 from firstpage_jev_lab.demo import make_demo
 from firstpage_jev_lab.gui import MainWindow
@@ -163,5 +163,48 @@ def test_openrouter_requires_key_and_user_approval(app, synthetic, monkeypatch):
         request = window._request()
         assert request.backend == "openrouter"
         assert request.allow_external_text is True
+    finally:
+        dispose_window(window, app)
+
+
+def test_sidebar_drop_down_does_not_hide_left_controls(app, synthetic):
+    pdf, _, _ = synthetic
+    window = MainWindow()
+    try:
+        window.resize(1000, 700)
+        window.show()
+        app.processEvents()
+        window.set_source(str(pdf))
+        window.backend_combo.setCurrentIndex(2)
+        app.processEvents()
+        assert window.backend_combo.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+        assert window.sample_combo.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+        assert window.backend_combo.width() <= 465
+        assert window.sample_combo.width() <= 465
+        assert window.run_button.isVisible()
+        assert window.export_button.isVisible()
+        assert len(window.backend_combo.currentText()) < 30
+    finally:
+        dispose_window(window, app)
+
+
+def test_openrouter_cancel_confirmation_never_calls_network(app, synthetic, monkeypatch):
+    pdf, _, _ = synthetic
+    window = MainWindow()
+    try:
+        window.set_source(str(pdf))
+        window.backend_combo.setCurrentIndex(2)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "SYNTHETIC_TEST_ONLY")
+        window.consent.setChecked(True)
+        prompts = []
+        def deny(*args, **kwargs):
+            prompts.append(args)
+            return QMessageBox.StandardButton.No
+        monkeypatch.setattr(QMessageBox, "warning", deny)
+        window.start_analysis()
+        assert len(prompts) == 1
+        assert "OpenRouter" in str(prompts[0])
+        assert window._worker is None
+        assert window.result is None
     finally:
         dispose_window(window, app)
